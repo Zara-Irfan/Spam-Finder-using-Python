@@ -1,0 +1,145 @@
+# Gmail Takeout Spam Detector (Working Version)
+# -------------------------------------------------------------
+# This script:
+#  - Extracts a Google Takeout ZIP
+#  - Finds MBOX
+#  - Reads emails
+#  - Detects spam (ML-free, keyword-based for reliability)
+#  - Displays clean readable output
+# -------------------------------------------------------------
+
+import os
+import zipfile
+import mailbox
+
+# -----------------------------
+# USER INPUT (no path written inside code)
+# -----------------------------
+ZIP_PATH = input("Enter path to your Gmail Takeout ZIP: ").strip()
+EXTRACT_DIR = "extracted_mail"
+
+# -----------------------------
+# 1. Extract ZIP
+# -----------------------------
+if not os.path.exists(ZIP_PATH):
+    raise FileNotFoundError(f"ZIP not found: {ZIP_PATH}")
+
+print(f"📦 Found ZIP: {ZIP_PATH}")
+print("📂 Extracting...")
+
+with zipfile.ZipFile(ZIP_PATH, "r") as z:
+    z.extractall(EXTRACT_DIR)
+
+# -----------------------------
+# 2. Locate MBOX
+# -----------------------------
+def find_mbox(root):
+    for r, _, files in os.walk(root):
+        for f in files:
+            if f.endswith(".mbox"):
+                return os.path.join(r, f)
+    return None
+
+mbox_file = find_mbox(EXTRACT_DIR)
+
+if not mbox_file:
+    print("❗ No MBOX found.")
+    raise SystemExit
+
+print(f"📬 MBOX found: {mbox_file}")
+
+# -----------------------------
+# 3. Load emails
+# -----------------------------
+mbox = mailbox.mbox(mbox_file)
+
+emails = []
+spam = []
+
+# Simple spam keywords
+SPAM_WORDS = [
+    "free",
+    "winner",
+    "urgent",
+    "prize",
+    "reward",
+    "claim",
+    "verify",
+]
+
+# -----------------------------
+# 4. Process emails
+# -----------------------------
+for msg in mbox:
+    subject = msg.get("subject", "") or ""
+    sender = msg.get("from", "") or ""
+
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                try:
+                    body += part.get_payload(decode=True).decode(errors="ignore")
+                except:
+                    pass
+    else:
+        try:
+            body = msg.get_payload(decode=True).decode(errors="ignore")
+        except:
+            body = msg.get_payload()
+
+    full_text = subject + " " + sender + " " + body
+
+    record = {
+        "from": sender,
+        "subject": subject,
+        "body": body,
+    }
+
+    emails.append(record)
+
+    # spam detection
+    text_low = full_text.lower()
+    if any(k in text_low for k in SPAM_WORDS):
+        spam.append(record)
+
+# -----------------------------
+# 5. Output
+# -----------------------------
+print(f"📊 Total emails: {len(emails)}")
+print(f"🚨 Spam found: {len(spam)}")
+
+if spam:
+    example = spam[0]
+    print("
+📌 Example spam email:")
+    print("From:", example["from"])
+    print("Subject:", example["subject"])
+    print("Body preview:", example["body"][:400])
+else:
+    print("✅ No spam emails found.")
+
+# -----------------------------
+# 6. Save files
+# -----------------------------
+with open("spam_results.txt", "w", encoding="utf-8") as f:
+    for s in spam:
+        f.write(f"From: {s['from']}
+Subject: {s['subject']}
+
+{s['body']}
+{'-'*60}
+")
+
+with open("all_emails.txt", "w", encoding="utf-8") as f:
+    for e in emails:
+        f.write(f"From: {e['from']}
+Subject: {e['subject']}
+
+{e['body']}
+{'='*60}
+")
+
+print("
+📄 Saved spam_results.txt")
+print("📚 Saved all_emails.txt")
